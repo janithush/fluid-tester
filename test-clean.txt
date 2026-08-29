@@ -1,0 +1,15 @@
+
+[1m[7m[36m RUN [39m[27m[22m [36mv2.1.9 [39m[90mD:/Projects/FlowMetrics/fluid-tester[39m
+
+ [32mΓ£ô[39m src/test/form-validation.test.ts [2m([22m[2m11 tests[22m[2m)[22m[90m 15[2mms[22m[39m
+ [32mΓ£ô[39m src/test/results-mapper.test.ts [2m([22m[2m13 tests[22m[2m)[22m[90m 16[2mms[22m[39m
+ [32mΓ£ô[39m src/test/api.test.ts [2m([22m[2m5 tests[22m[2m)[22m[90m 18[2mms[22m[39m
+ [32mΓ£ô[39m src/test/status-colors.test.ts [2m([22m[2m10 tests[22m[2m)[22m[90m 11[2mms[22m[39m
+ [32mΓ£ô[39m src/test/pdf-report.test.ts [2m([22m[2m8 tests[22m[2m)[22m[90m 10[2mms[22m[39m
+ [32mΓ£ô[39m src/test/vehicle-form.test.tsx [2m([22m[2m6 tests[22m[2m)[22m[90m 210[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m6 passed[39m[22m[90m (6)[39m
+[2m      Tests [22m [1m[32m53 passed[39m[22m[90m (53)[39m
+[2m   Start at [22m 06:38:14
+[2m   Duration [22m 3.68s[2m (transform 553ms, setup 4.85s, collect 1.17s, tests 280ms, environment 9.12s, prepare 1.28s)[22m
+
