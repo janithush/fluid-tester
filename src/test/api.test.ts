@@ -80,7 +80,7 @@ describe('fetchFluidResults', () => {
 
     await fetchFluidResults()
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://fluidtester.local/api/results',
+      'http://fluidtester.local/api/data',
       expect.objectContaining({ method: 'GET' }),
     )
 
