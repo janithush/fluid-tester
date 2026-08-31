@@ -9,10 +9,14 @@ export class DeviceDisconnectedError extends Error {
 
 /**
  * Fetches the latest fluid results from the ESP32's HTTP endpoint.
- * The endpoint URL defaults to the mDNS host configured in Phase 1.
+ *
+ * The ESP32 firmware exposes a single endpoint at `/api/data` and emits a
+ * nested JSON object that matches `FluidResultsResponse`. We hit that
+ * endpoint here (it was previously `/api/results`, which the ESP32 never
+ * served and caused every "Fetch Latest Reading" click to 404).
  */
 export async function fetchFluidResults(
-  endpoint = 'http://fluidtester.local/api/results',
+  endpoint = 'http://fluidtester.local/api/data',
   signal?: AbortSignal,
 ): Promise<FluidResultsResponse> {
   let res: Response
