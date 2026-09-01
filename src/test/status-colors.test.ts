@@ -54,6 +54,17 @@ describe('getStatusVisual (status -> color mapping)', () => {
     warn.mockRestore()
   })
 
+  it('maps NO_DATA to gray with NO DATA label', () => {
+    const v = getStatusVisual('NO_DATA')
+    expect(v.color).toBe('gray')
+    expect(v.label).toBe('NO DATA')
+  })
+
+  it('maps no_data (lowercase) to gray', () => {
+    expect(getStatusVisual('no_data').color).toBe('gray')
+    expect(getStatusVisual('no_data').label).toBe('NO DATA')
+  })
+
   it('returns the full StatusVisual (bgClass, textClass, borderClass, glowClass, dotHex, label)', () => {
     const v = getStatusVisual('GOOD')
     expect(v.bgClass).toContain('emerald')

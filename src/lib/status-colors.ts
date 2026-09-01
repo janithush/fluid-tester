@@ -68,6 +68,16 @@ const UNKNOWN_VISUAL: StatusVisual = {
   label: 'UNKNOWN',
 }
 
+const NO_DATA_VISUAL: StatusVisual = {
+  color: 'gray',
+  bgClass: 'bg-slate-500/10',
+  textClass: 'text-slate-400',
+  borderClass: 'border-slate-400/20',
+  glowClass: 'glow-gray',
+  dotHex: '#64748b',
+  label: 'NO DATA',
+}
+
 /**
  * Maps a raw status string from the ESP32 (or a synthetic UI status) to
  * a strict set of three safety colors + one fallback gray for errors.
@@ -76,7 +86,7 @@ const UNKNOWN_VISUAL: StatusVisual = {
  *   GOOD / NORMAL  -> green
  *   WARNING / BAD  -> yellow/orange
  *   CRITICAL       -> red
- *   unknown / error / missing -> gray
+ *   NO_DATA / UNKNOWN / ERROR / missing -> gray
  */
 export function getStatusVisual(status: FluidStatus | string | null | undefined): StatusVisual {
   if (status == null) return ERROR_VISUAL
@@ -91,6 +101,8 @@ export function getStatusVisual(status: FluidStatus | string | null | undefined)
       return WARNING_VISUAL
     case 'CRITICAL':
       return CRITICAL_VISUAL
+    case 'NO_DATA':
+      return NO_DATA_VISUAL
     case 'ERROR':
       return ERROR_VISUAL
     case 'UNKNOWN':

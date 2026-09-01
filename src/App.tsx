@@ -4,13 +4,18 @@ import { Card, CardContent } from '@/components/ui/card'
 import { VehicleFormCard } from '@/components/vehicle-form'
 import { FluidResultCard } from '@/components/fluid-card'
 import { EmptyState, FluidCardSkeleton } from '@/components/states'
-import { fetchFluidResults, DeviceDisconnectedError } from '@/lib/api'
+import { ConnectionIndicator } from '@/components/connection-indicator'
+import { useFluidStream } from '@/hooks/useFluidStream'
+import type { StreamStatus } from '@/hooks/useFluidStream'
 import { mapAllResults } from '@/lib/results-mapper'
 import type { FluidCardModel } from '@/lib/results-mapper'
 import { isFormValid } from '@/lib/form-validation'
 import { canGenerateReport, generateReport } from '@/lib/pdf-report'
 import type { FormErrors, FluidResultsResponse, VehicleForm } from '@/types/fluid'
 
+/**
+ * View state of the results area, derived from the WebSocket stream.
+ */
 type FetchState =
   | { kind: 'idle' }
   | { kind: 'loading' }
@@ -26,28 +31,38 @@ const INITIAL_FORM: VehicleForm = {
 export default function App() {
   const [form, setForm] = useState<VehicleForm>(INITIAL_FORM)
   const [, setFormErrors] = useState<FormErrors>({})
-  const [fetchState, setFetchState] = useState<FetchState>({ kind: 'idle' })
+
+  const stream = useFluidStream()
+
+  // Derive the UI's FetchState from the hook. The hook's "streaming"
+  // status means the socket is open; we only flip to "success" once a
+  // frame has been seen so we don't show the results area empty.
+  let fetchState: FetchState
+  if (stream.error && stream.status === 'error') {
+    fetchState = { kind: 'error' }
+  } else if (stream.data) {
+    fetchState = { kind: 'success', data: stream.data }
+  } else if (stream.status === 'streaming' || stream.status === 'connecting') {
+    fetchState = { kind: 'loading' }
+  } else {
+    fetchState = { kind: 'idle' }
+  }
 
   const results: FluidCardModel[] | null =
     fetchState.kind === 'success' ? mapAllResults(fetchState.data) : null
 
-  const handleFetch = useCallback(async () => {
-    setFetchState({ kind: 'loading' })
-    try {
-      const data = await fetchFluidResults()
-      setFetchState({ kind: 'success', data })
-      toast.success('Diagnostic data loaded.', {
-        description: 'Fluid readings received from device.',
-      })
-    } catch (err) {
-      setFetchState({ kind: 'error' })
-      const message =
-        err instanceof DeviceDisconnectedError
-          ? err.message
-          : 'Device Disconnected. Please check connection.'
-      toast.error(message)
+  const handleFetch = useCallback(() => {
+    if (stream.isStreaming) {
+      // Already streaming — treat the button as a no-op so the operator
+      // can see the live data without interruption.
+      return
     }
-  }, [])
+    stream.start()
+  }, [stream])
+
+  const handleStop = useCallback(() => {
+    stream.stop()
+  }, [stream])
 
   const handlePrint = useCallback(() => {
     if (!results) {
@@ -70,8 +85,11 @@ export default function App() {
     }
   }, [form, results])
 
-  const isPrintEnabled = canGenerateReport(form, results)
+  // Generate Report is enabled only when we have a frozen snapshot
+  // (the user has explicitly stopped the stream AND there's data).
+  const isPrintEnabled = stream.frozen && canGenerateReport(form, results)
   const isLoading = fetchState.kind === 'loading'
+  const showStopButton = stream.isStreaming || stream.status === 'connecting'
 
   return (
     <div className="relative min-h-full">
@@ -87,30 +105,60 @@ export default function App() {
           },
         }}
       />
-      <AppHeader fetchState={fetchState} />
+      <AppHeader
+        streamStatus={stream.status}
+        isStreaming={stream.isStreaming}
+        hasData={stream.data !== null}
+      />
       <main className="relative z-10 mx-auto max-w-2xl space-y-4 p-4 pb-36">
         <VehicleFormCard
           value={form}
           onChange={setForm}
           onValidationChange={setFormErrors}
         />
-        <FetchButton onClick={handleFetch} isLoading={isLoading} />
+        <FetchControls
+          onFetch={handleFetch}
+          onStop={handleStop}
+          isLoading={isLoading}
+          showStop={showStopButton}
+        />
         <StateArea fetchState={fetchState} results={results} />
       </main>
-      <PrintBar isPrintEnabled={isPrintEnabled} onPrint={handlePrint} />
+      <PrintBar
+        isPrintEnabled={isPrintEnabled}
+        onPrint={handlePrint}
+        frozen={stream.frozen}
+      />
     </div>
   )
 }
 
-function AppHeader({ fetchState }: { fetchState: FetchState }) {
-  const status =
-    fetchState.kind === 'success'
-      ? { dot: 'bg-emerald-400 glow-green', label: 'Online' }
-      : fetchState.kind === 'loading'
-        ? { dot: 'bg-cyan-400 glow-cyan animate-pulse', label: 'Syncing' }
-        : fetchState.kind === 'error'
-          ? { dot: 'bg-rose-400 glow-red', label: 'Offline' }
-          : { dot: 'bg-slate-500', label: 'Standby' }
+interface AppHeaderProps {
+  streamStatus: StreamStatus
+  isStreaming: boolean
+  hasData: boolean
+}
+
+function AppHeader({ streamStatus, isStreaming, hasData }: AppHeaderProps) {
+  const headerLabel =
+    streamStatus === 'streaming'
+      ? hasData
+        ? 'Signal Live'
+        : 'Acquiring'
+      : streamStatus === 'connecting'
+        ? 'Connecting'
+        : streamStatus === 'error'
+          ? 'Signal Lost'
+          : 'Standby'
+
+  const tone =
+    streamStatus === 'streaming'
+      ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-300'
+      : streamStatus === 'connecting'
+        ? 'border-amber-400/30 bg-amber-500/10 text-amber-300'
+        : streamStatus === 'error'
+          ? 'border-rose-400/30 bg-rose-500/10 text-rose-300'
+          : 'border-white/10 bg-white/5 text-white/50'
 
   return (
     <header className="sticky top-0 z-20 border-b border-white/5 bg-[#050816]/60 px-4 py-3 backdrop-blur-2xl">
@@ -131,10 +179,24 @@ function AppHeader({ fetchState }: { fetchState: FetchState }) {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-1.5">
-          <span className={`inline-block h-1.5 w-1.5 rounded-full ${status.dot}`} aria-hidden="true" />
-          <span className="text-[10px] uppercase tracking-widest text-white/50">
-            {status.label}
+        <div className="flex items-center gap-2">
+          <ConnectionIndicator status={streamStatus} isStreaming={isStreaming} />
+          <span
+            className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[10px] font-bold uppercase tracking-widest ${tone}`}
+          >
+            <span
+              className={`inline-block h-1.5 w-1.5 rounded-full ${
+                streamStatus === 'streaming'
+                  ? 'bg-emerald-400 glow-green animate-pulse'
+                  : streamStatus === 'error'
+                    ? 'bg-rose-400'
+                    : streamStatus === 'connecting'
+                      ? 'bg-amber-400 animate-pulse'
+                      : 'bg-white/40'
+              }`}
+              aria-hidden="true"
+            />
+            {headerLabel}
           </span>
         </div>
       </div>
@@ -142,11 +204,61 @@ function AppHeader({ fetchState }: { fetchState: FetchState }) {
   )
 }
 
-function FetchButton({ onClick, isLoading }: { onClick: () => void; isLoading: boolean }) {
+function FetchControls({
+  onFetch,
+  onStop,
+  isLoading,
+  showStop,
+}: {
+  onFetch: () => void
+  onStop: () => void
+  isLoading: boolean
+  showStop: boolean
+}) {
+  if (showStop) {
+    return (
+      <div className="grid grid-cols-[1fr_auto] gap-3">
+        <button
+          type="button"
+          disabled
+          data-testid="btn-fetch"
+          className="btn-neon flex h-14 items-center justify-center gap-2 rounded-xl text-sm font-semibold uppercase tracking-wider"
+        >
+          {isLoading ? (
+            <>
+              <span
+                className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-white/30 border-t-white"
+                aria-hidden="true"
+              />
+              <span>Streaming…</span>
+            </>
+          ) : (
+            <>
+              <span
+                className="inline-block h-2 w-2 rounded-full bg-emerald-400 animate-pulse"
+                style={{ boxShadow: '0 0 10px rgba(52,211,153,0.8)' }}
+                aria-hidden="true"
+              />
+              <span>Live Reading</span>
+            </>
+          )}
+        </button>
+        <button
+          type="button"
+          onClick={onStop}
+          data-testid="btn-stop"
+          className="flex h-14 items-center justify-center gap-2 rounded-xl border border-rose-400/30 bg-rose-500/10 px-4 text-sm font-semibold uppercase tracking-wider text-rose-300 transition hover:bg-rose-500/20"
+        >
+          <span aria-hidden="true">■</span>
+          <span>Stop</span>
+        </button>
+      </div>
+    )
+  }
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={onFetch}
       disabled={isLoading}
       data-testid="btn-fetch"
       className={`btn-neon flex h-14 w-full items-center justify-center gap-2 rounded-xl text-sm font-semibold uppercase tracking-wider shadow-lg ${
@@ -224,9 +336,11 @@ function StateArea({
 function PrintBar({
   isPrintEnabled,
   onPrint,
+  frozen,
 }: {
   isPrintEnabled: boolean
   onPrint: () => void
+  frozen: boolean
 }) {
   return (
     <div className="fixed inset-x-0 bottom-0 z-20 border-t border-white/5 bg-[#050816]/80 p-4 backdrop-blur-2xl">
@@ -236,10 +350,16 @@ function PrintBar({
           onClick={onPrint}
           disabled={!isPrintEnabled}
           data-testid="btn-print"
-          className="btn-activation flex h-14 w-full items-center justify-center gap-3 rounded-xl text-sm font-semibold uppercase tracking-wider"
+          className="btn-neon flex h-14 w-full items-center justify-center gap-3 rounded-xl text-sm font-semibold uppercase tracking-wider"
         >
           <span className="text-base" aria-hidden="true">🖨️</span>
-          <span>{isPrintEnabled ? 'Activate Report' : 'Report Standby'}</span>
+          <span>
+            {isPrintEnabled
+              ? 'Generate Report'
+              : frozen
+                ? 'Report Standby (form)'
+                : 'Report Standby'}
+          </span>
           <span
             className={`ml-1 inline-block h-1.5 w-1.5 rounded-full ${
               isPrintEnabled ? 'bg-emerald-400 glow-green animate-pulse' : 'bg-white/30'

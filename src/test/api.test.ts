@@ -9,16 +9,14 @@ describe('fetchFluidResults', () => {
   it('returns parsed JSON on a successful response', async () => {
     const data = {
       brake_oil: { moisture: '2%', status: 'GOOD' },
-      engine_oil: { dielectric: 2.1, water: 'NO', status: 'GOOD' },
-      coolant: { ph: 7, status: 'GOOD' },
-    }
+      engine_oil: { dielectric: 2.1, water: 'NO', status: 'GOOD', capacitance: null, tbn: null, tan: null, viscosity: null},
+      coolant: { ph: 7, status: 'GOOD' }, }
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
         ok: true,
         status: 200,
-        json: () => Promise.resolve(data),
-      }),
+        json: () => Promise.resolve(data) }),
     )
 
     const result = await fetchFluidResults()
@@ -43,8 +41,7 @@ describe('fetchFluidResults', () => {
       vi.fn().mockResolvedValue({
         ok: false,
         status: 404,
-        json: () => Promise.resolve({}),
-      }),
+        json: () => Promise.resolve({}) }),
     )
 
     await expect(fetchFluidResults()).rejects.toBeInstanceOf(
@@ -58,8 +55,7 @@ describe('fetchFluidResults', () => {
       vi.fn().mockResolvedValue({
         ok: true,
         status: 200,
-        json: () => Promise.reject(new SyntaxError('Unexpected token')),
-      }),
+        json: () => Promise.reject(new SyntaxError('Unexpected token')) }),
     )
 
     await expect(fetchFluidResults()).rejects.toBeInstanceOf(
@@ -73,8 +69,7 @@ describe('fetchFluidResults', () => {
     const fakeResponse = {
       ok: true,
       status: 200,
-      json: () => Promise.resolve({}),
-    }
+      json: () => Promise.resolve({}) }
     const fetchMock = vi.fn().mockResolvedValue(fakeResponse)
     vi.stubGlobal('fetch', fetchMock)
 

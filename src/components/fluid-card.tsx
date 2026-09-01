@@ -26,9 +26,14 @@ export function FluidResultCard({ model }: FluidCardProps) {
 
   return (
     <Card
-      className={cn('glass rounded-2xl', visual.borderClass)}
+      className={cn(
+        'glass rounded-2xl',
+        model.noData && 'border-dashed opacity-80',
+        visual.borderClass,
+      )}
       data-testid={`fluid-card-${model.kind}`}
       data-status={model.status}
+      data-nodata={model.noData ? 'true' : 'false'}
     >
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
         <CardTitle className="flex items-center gap-3 text-white">
@@ -72,21 +77,42 @@ export function FluidResultCard({ model }: FluidCardProps) {
 
       <CardContent className="pt-0">
         <div className="flex items-baseline gap-2">
-          <p
-            className="text-3xl font-bold tabular-nums text-white"
-            data-testid={`metric-${model.kind}`}
-          >
-            {model.primaryMetric}
-          </p>
+          {model.noData ? (
+            <p
+              className="text-base italic text-white/40"
+              data-testid={`metric-${model.kind}`}
+              data-nodata="true"
+            >
+              {model.primaryMetric}
+            </p>
+          ) : (
+            <p
+              className="text-3xl font-bold tabular-nums text-white"
+              data-testid={`metric-${model.kind}`}
+            >
+              {model.primaryMetric}
+            </p>
+          )}
         </div>
-        {model.secondaryMetrics.length > 0 && (
+        {!model.noData && model.secondaryMetrics.length > 0 && (
           <ul className="mt-3 space-y-1 border-t border-white/5 pt-3 text-sm text-white/60">
-            {model.secondaryMetrics.map((m) => (
-              <li key={m} className="flex items-center gap-2">
-                <span className="inline-block h-1 w-1 rounded-full bg-cyan-400/60" />
-                {m}
-              </li>
-            ))}
+            {model.secondaryMetrics.map((m) => {
+              // Derive a slug for the data-testid. The first whitespace
+              // run in each line is the label (e.g. "TBN: 8.20 mg KOH/g"
+              // -> slug "tbn"). Falls back to a numeric index if no
+              // recognizable label.
+              const label = m.split(':')[0]?.trim().toLowerCase().replace(/\s+/g, '-') ?? 'item'
+              return (
+                <li
+                  key={m}
+                  className="flex items-center gap-2"
+                  data-testid={`submetric-${model.kind}-${label}`}
+                >
+                  <span className="inline-block h-1 w-1 rounded-full bg-cyan-400/60" />
+                  {m}
+                </li>
+              )
+            })}
           </ul>
         )}
       </CardContent>
