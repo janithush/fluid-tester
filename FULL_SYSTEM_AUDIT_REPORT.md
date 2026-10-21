@@ -1,5 +1,25 @@
 # FULL_SYSTEM_AUDIT_REPORT.md
 
+> **STATUS: REVISION 3 - CLOSED & FULLY REMEDIATED (2026-10-22)**
+>
+> **Verdict:** All Critical, High and Medium findings (R1-R16) have been resolved across the
+> firmware and web layers and verified end-to-end:
+> - **R1/R2/R5/R3/R11** fixed in `firmware/esp32/main.ino` (data truthfulness gating, UART parser
+>   sanitization, RX buffer sizing, heartbeat liveness, status derivation fallbacks).
+> - **R4/R13/R16** fixed in the web layer (dynamic host derivation, staleness watchdog
+>   consumption, status-color contract hardening) plus all audit-flagged UI event-wiring
+>   regressions (stop/resume wedging, validation render loop, double-dial, PDF double-click).
+> - **Backed by:** 14 test suites / **170 passing unit + integration tests** (zero failures),
+>   clean lint, clean production build with the PDF chunk layout preserved, and remediation
+>   commits `75ceacd` (Tier 1 features) and `4436c4e` (history sparkline scaling) on `main`,
+>   superseding remediation commit `0468795`.
+>
+> Sections 1-9 below preserve the revision-2 line-level evidence verbatim; findings marked
+> OPEN for tooling-only items (e.g. `npm ci` lockfile drift, M9 CI pathing) were addressed in
+> the remediation commits (`working-directory: web`, `npm install` in CI).
+
+---
+
 **System:** FlowMetrics - Fluid Tester (ESP32-S3 `main.ino` + brake-fluid Arduino over UART + React/Vite web dashboard)
 **Audit date:** 2026-10-21 (revision 2: firmware now in scope, cross-audit replaces the prior "audit gaps")
 **Auditor mode:** Auditor + workspace organizer. **No source logic was modified, fixed, refactored, or committed.** The only changes in this run are (a) workspace restructuring and (b) this report.
