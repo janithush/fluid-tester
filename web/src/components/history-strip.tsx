@@ -32,9 +32,14 @@ function polyline(points: Array<{ x: number; y: number }>): string {
   return points.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')
 }
 
-const W = 220
-const H = 44
-const PAD = 3
+// Trend canvas geometry (viewBox units; the SVG stretches via CSS width).
+// "none" preserveAspectRatio lets the same path coordinates fill any card
+// width; polylines carry vector-effect so strokes stay 2 CSS px thick.
+const VG_W = 300
+const VG_H = 60
+const PAD_X = 12
+const PAD_Y = 6
+const DOT_R = 3
 
 function sparklineY(values: Array<number | null>): Array<number | null> {
   const nums = values.filter((v): v is number => v !== null)
@@ -43,7 +48,7 @@ function sparklineY(values: Array<number | null>): Array<number | null> {
   const max = Math.max(...nums)
   const span = max - min || 1
   return values.map((v) =>
-    v === null ? null : PAD + (H - 2 * PAD) * (1 - (v - min) / span),
+    v === null ? null : PAD_Y + (VG_H - 2 * PAD_Y) * (1 - (v - min) / span),
   )
 }
 
@@ -86,25 +91,31 @@ export function HistoryStrip({
 
   if (!runs || runs.length === 0) return null
 
-  // Trend series: oldest -> newest, x even-spaced.
+  // Trend series: oldest -> newest. X is proportional to the km interval
+  // range (an odometer axis, not just an index), so uneven service gaps
+  // render with faithful spacing; degenerate equal-km sessions fall back
+  // to an even spread between the padding edges.
   const ordered = [...runs].reverse()
   const engineYs = sparklineY(ordered.map(extractEr))
   const brakeYs = sparklineY(ordered.map(extractMoisture))
 
+  const kmList = ordered.map((r) => r.kmUsage)
+  const minKm = Math.min(...kmList)
+  const maxKm = Math.max(...kmList)
+  const kmSpan = maxKm - minKm
+  const xFor = (km: number, index: number): number =>
+    kmSpan > 0
+      ? PAD_X + (VG_W - 2 * PAD_X) * ((km - minKm) / kmSpan)
+      : ordered.length === 1
+        ? VG_W / 2
+        : PAD_X + (VG_W - 2 * PAD_X) * (index / (ordered.length - 1))
+
   const enginePoints = ordered
-    .map((run, i) => ({
-      x: 6 + i * 4,
-      y: engineYs[i],
-      km: run.kmUsage,
-    }))
+    .map((run, i) => ({ x: xFor(run.kmUsage, i), y: engineYs[i], km: run.kmUsage }))
     .filter((p): p is { x: number; y: number; km: number } => p.y !== null)
 
   const brakePoints = ordered
-    .map((run, i) => ({
-      x: 6 + i * 4,
-      y: brakeYs[i],
-      km: run.kmUsage,
-    }))
+    .map((run, i) => ({ x: xFor(run.kmUsage, i), y: brakeYs[i], km: run.kmUsage }))
     .filter((p): p is { x: number; y: number; km: number } => p.y !== null)
 
   return (
@@ -122,16 +133,43 @@ export function HistoryStrip({
           )}
         </div>
 
-        {/* Degradation trend: SVG polylines per fluid (no chart libs) */}
-        {ordered.length > 1 && (enginePoints.length > 1 || brakePoints.length > 1) && (
+        {/* Degradation trend: full-width SVG polylines + dot markers
+            per fluid (no chart libs). The svg flexes across the card and
+            the legend sits beside it on the same row. */}
+        {ordered.length > 1 && (enginePoints.length >= 1 || brakePoints.length >= 1) && (
           <div className="flex items-center gap-3" data-testid="history-trend">
             <svg
-              width={Math.min(W, 60 + ordered.length * 28)}
-              height={H}
-              className="shrink-0"
+              viewBox={`0 0 ${VG_W} ${VG_H}`}
+              preserveAspectRatio="none"
+              className="h-16 min-w-0 flex-1"
               role="img"
               aria-label="Degradation trend across service intervals"
+              data-testid="history-trend-svg"
             >
+              {brakePoints.length >= 1 &&
+                brakePoints.map((p, i) => (
+                  <circle
+                    key={`brake-dot-${i}`}
+                    cx={p.x}
+                    cy={p.y}
+                    r={DOT_R}
+                    fill="#fb7185"
+                    stroke="#881337"
+                    strokeWidth="1"
+                  />
+                ))}
+              {enginePoints.length >= 1 &&
+                enginePoints.map((p, i) => (
+                  <circle
+                    key={`engine-dot-${i}`}
+                    cx={p.x}
+                    cy={p.y}
+                    r={DOT_R}
+                    fill="#fbbf24"
+                    stroke="#78350f"
+                    strokeWidth="1"
+                  />
+                ))}
               {brakePoints.length > 1 && (
                 <polyline
                   points={polyline(brakePoints)}
@@ -139,6 +177,8 @@ export function HistoryStrip({
                   stroke="#fb7185"
                   strokeWidth="2"
                   strokeLinecap="round"
+                  strokeLinejoin="round"
+                  vectorEffect="non-scaling-stroke"
                 />
               )}
               {enginePoints.length > 1 && (
@@ -148,10 +188,12 @@ export function HistoryStrip({
                   stroke="#fbbf24"
                   strokeWidth="2"
                   strokeLinecap="round"
+                  strokeLinejoin="round"
+                  vectorEffect="non-scaling-stroke"
                 />
               )}
             </svg>
-            <div className="flex flex-col gap-1 text-[10px] uppercase tracking-wider text-white/40">
+            <div className="flex shrink-0 flex-col gap-1 text-[10px] uppercase tracking-wider text-white/40">
               <span className="flex items-center gap-1.5">
                 <span className="inline-block h-1 w-3 rounded-full bg-rose-300" /> Brake moisture
               </span>
