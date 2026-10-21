@@ -113,7 +113,15 @@ export function VehicleFormCard({ value, onChange, onValidationChange }: Vehicle
             placeholder="e.g. ABC1234"
             value={value.vehicleNumber}
             onChange={(e) => {
-              onChange({ ...value, vehicleNumber: e.target.value })
+              // Tier 1: workshop plates are conventionally uppercase;
+              // normalize as the operator types so "wp-cab-1234" is
+              // stored and printed identically to "WP-CAB-1234". The
+              // raw value is kept (not trimmed) so mid-typing spaces
+              // are not swallowed.
+              onChange({
+                ...value,
+                vehicleNumber: e.target.value.toUpperCase(),
+              })
               markTouched('vehicleNumber')
             }}
             onBlur={() => markTouched('vehicleNumber')}

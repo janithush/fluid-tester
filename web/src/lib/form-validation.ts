@@ -1,6 +1,9 @@
 import type { FormErrors, VehicleForm } from '@/types/fluid'
 
-const VEHICLE_NUMBER_REGEX = /^[A-Za-z0-9]+$/
+// Tier 1: real workshop plates carry hyphens and spaces ("WP-CAB-1234",
+// "CAB 1234"). Accept 3-15 chars of letters, digits, hyphens and spaces.
+// Length guards keep the PDF filename sane.
+export const VEHICLE_NUMBER_REGEX = /^[A-Za-z0-9 -]{3,15}$/
 const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/
 
 /**
@@ -30,7 +33,8 @@ export function validateForm(form: VehicleForm): FormErrors {
   if (!form.vehicleNumber || !form.vehicleNumber.trim()) {
     errors.vehicleNumber = 'Vehicle number is required.'
   } else if (!VEHICLE_NUMBER_REGEX.test(form.vehicleNumber.trim())) {
-    errors.vehicleNumber = 'Vehicle number must be alphanumeric.'
+    errors.vehicleNumber =
+      'Vehicle number must be alphanumeric (3-15 letters, numbers, hyphens or spaces).'
   }
 
   const km = Number(form.kmUsage)

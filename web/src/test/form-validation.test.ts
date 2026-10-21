@@ -47,9 +47,15 @@ describe('validateForm', () => {
     expect(errs.vehicleNumber).toBeDefined()
   })
 
-  it('rejects vehicle number with non-alphanumeric characters', () => {
-    const errs = validateForm({ ...baseValid, vehicleNumber: 'AB-123' })
+  it('rejects vehicle numbers with invalid symbols', () => {
+    // Tier 1 regex now allows hyphens and spaces, but symbols stay out.
+    const errs = validateForm({ ...baseValid, vehicleNumber: 'AB@12' })
     expect(errs.vehicleNumber).toMatch(/alphanumeric/i)
+  })
+
+  it('accepts workshop plates with hyphens and spaces', () => {
+    expect(validateForm({ ...baseValid, vehicleNumber: 'WP-CAB-1234' })).toEqual({})
+    expect(validateForm({ ...baseValid, vehicleNumber: 'CAB 1234' })).toEqual({})
   })
 
   it('accepts alphanumeric vehicle numbers of any case', () => {

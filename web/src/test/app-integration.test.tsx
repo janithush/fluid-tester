@@ -134,9 +134,10 @@ describe('<App /> integration - vehicle form validation', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    // Date is auto-filled on mount; vehicle number "AB-123" violates
-    // the alnum-only contract (^[A-Za-z0-9]+$).
-    await user.type(screen.getByTestId('input-vehicle'), 'AB-123')
+    // Date is auto-filled on mount; "AB@12" violates the Tier 1 plate
+    // contract (^A-Za-z0-9 -]{3,15}$ - symbols stay out even though
+    // hyphens are now legal).
+    await user.type(screen.getByTestId('input-vehicle'), 'AB@12')
     expect(screen.getByTestId('error-vehicle')).toBeInTheDocument()
     expect(screen.getByTestId('input-vehicle')).toHaveClass('has-error')
 

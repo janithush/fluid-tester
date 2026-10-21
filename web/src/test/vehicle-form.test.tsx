@@ -51,12 +51,12 @@ describe('<VehicleFormCard />', () => {
 
     // After typing an invalid value, the error appears
     const vehicleInput = screen.getByTestId('input-vehicle')
-    fireEvent.change(vehicleInput, { target: { value: 'AB-12' } })
+    fireEvent.change(vehicleInput, { target: { value: 'AB@12' } })
     expect(screen.getByTestId('error-vehicle')).toBeInTheDocument()
   })
 
   it('shows an error after blur on an invalid vehicle number (no typing)', () => {
-    const value: VehicleForm = { date: '2026-08-29', vehicleNumber: 'AB-12', kmUsage: 100 }
+    const value: VehicleForm = { date: '2026-08-29', vehicleNumber: 'AB@12', kmUsage: 100 }
     render(<VehicleFormCard value={value} onChange={() => {}} />)
 
     // Initially no error (untouched)

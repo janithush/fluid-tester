@@ -1,16 +1,28 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Toaster, toast } from 'sonner'
 import { Card, CardContent } from '@/components/ui/card'
 import { VehicleFormCard } from '@/components/vehicle-form'
 import { FluidResultCard } from '@/components/fluid-card'
 import { EmptyState, FluidCardSkeleton } from '@/components/states'
 import { ConnectionIndicator } from '@/components/connection-indicator'
+import { ProfileSelect } from '@/components/profile-select'
+import { HistoryStrip } from '@/components/history-strip'
 import { useFluidStream } from '@/hooks/useFluidStream'
 import type { StreamStatus } from '@/hooks/useFluidStream'
 import { mapAllResults } from '@/lib/results-mapper'
 import type { FluidCardModel } from '@/lib/results-mapper'
+import { evaluateAllResults } from '@/lib/fluid-profiles'
+import type { ProfileEvaluation } from '@/lib/fluid-profiles'
 import { isFormValid } from '@/lib/form-validation'
 import { canGenerateReport, generateReport } from '@/lib/pdf-report'
+import {
+  exportSessionAsCsv,
+  exportSessionAsJson,
+} from '@/lib/export'
+import {
+  buildDiagnosticRun,
+  saveRun,
+} from '@/lib/history-db'
 import type { FormErrors, FluidResultsResponse, VehicleForm } from '@/types/fluid'
 
 /**
@@ -32,6 +44,10 @@ export default function App() {
   const [form, setForm] = useState<VehicleForm>(INITIAL_FORM)
   const [, setFormErrors] = useState<FormErrors>({})
 
+  // F1: advisory threshold profiles (defaults = workshop majority).
+  const [brakeProfileId, setBrakeProfileId] = useState<string | null>('dot-4')
+  const [engineProfileId, setEngineProfileId] = useState<string | null>('semi-10w40')
+
   const stream = useFluidStream()
 
   // Derive the UI's FetchState from the hook. The hook's "streaming"
@@ -50,6 +66,41 @@ export default function App() {
 
   const results: FluidCardModel[] | null =
     fetchState.kind === 'success' ? mapAllResults(fetchState.data) : null
+
+  // F1: advisory re-grades against the selected fluid spec sheets.
+  const profileEvaluations = evaluateAllResults(results ?? [], {
+    brakeProfileId,
+    engineProfileId,
+  })
+
+  // F4: persist each completed measurement session the moment the stream
+  // is stopped, exactly once per frozen dataset. Failures (unsupported
+  // environment, quota) degrade to silence - history is never load-bearing.
+  const lastSavedDataRef = useRef<FluidResultsResponse | null>(null)
+  useEffect(() => {
+    if (!stream.frozen || stream.status !== 'idle') return
+    const data = stream.data
+    if (!data || lastSavedDataRef.current === data) return
+    lastSavedDataRef.current = data
+    const run = buildDiagnosticRun(form, data, mapAllResults(data), {
+      brakeProfileId,
+      engineProfileId,
+    })
+    saveRun(run)
+      .then(() => toast.success('Session saved to vehicle history'))
+      .catch(() => {
+        // No IndexedDB (tests / private mode): silent no-op by design.
+      })
+  }, [stream.frozen, stream.status, stream.data, form, brakeProfileId, engineProfileId])
+
+  // F5: exports share the report bar's enabled state (frozen + data).
+  const handleExportCsv = useCallback(() => {
+    if (results) exportSessionAsCsv({ form, results })
+  }, [form, results])
+
+  const handleExportJson = useCallback(() => {
+    if (results) exportSessionAsJson({ form, results })
+  }, [form, results])
 
   const handleFetch = useCallback(() => {
     if (stream.isStreaming || stream.status === 'connecting') {
@@ -123,6 +174,16 @@ export default function App() {
           onChange={setForm}
           onValidationChange={setFormErrors}
         />
+        <ProfileSelect
+          brakeProfileId={brakeProfileId}
+          engineProfileId={engineProfileId}
+          onChange={(next) => {
+            setBrakeProfileId(next.brakeProfileId)
+            setEngineProfileId(next.engineProfileId)
+          }}
+        />
+        {/* F4: historical context appears as soon as the plate resolves */}
+        <HistoryStrip vehicleNumber={form.vehicleNumber} />
         <FetchControls
           onFetch={handleFetch}
           onStop={handleStop}
@@ -130,11 +191,18 @@ export default function App() {
           showStop={showStopButton}
           frozen={stream.frozen}
         />
-        <StateArea fetchState={fetchState} results={results} />
+        <StateArea
+          fetchState={fetchState}
+          results={results}
+          profileEvaluations={profileEvaluations}
+        />
       </main>
       <PrintBar
         isPrintEnabled={isPrintEnabled}
         onPrint={handlePrint}
+        onExportCsv={handleExportCsv}
+        onExportJson={handleExportJson}
+        isExportEnabled={stream.frozen && results !== null}
         frozen={stream.frozen}
       />
     </div>
@@ -316,9 +384,11 @@ function FetchControls({
 function StateArea({
   fetchState,
   results,
+  profileEvaluations,
 }: {
   fetchState: FetchState
   results: FluidCardModel[] | null
+  profileEvaluations: Record<FluidCardModel['kind'], ProfileEvaluation | null>
 }) {
   if (fetchState.kind === 'idle') return <EmptyState />
   if (fetchState.kind === 'error') {
@@ -349,7 +419,11 @@ function StateArea({
     return (
       <div className="space-y-4" data-testid="results">
         {results.map((r) => (
-          <FluidResultCard key={r.kind} model={r} />
+          <FluidResultCard
+            key={r.kind}
+            model={r}
+            profileEvaluation={profileEvaluations[r.kind]}
+          />
         ))}
       </div>
     )
@@ -360,10 +434,16 @@ function StateArea({
 function PrintBar({
   isPrintEnabled,
   onPrint,
+  onExportCsv,
+  onExportJson,
+  isExportEnabled,
   frozen,
 }: {
   isPrintEnabled: boolean
   onPrint: () => void
+  onExportCsv: () => void
+  onExportJson: () => void
+  isExportEnabled: boolean
   frozen: boolean
 }) {
   return (
@@ -394,6 +474,38 @@ function PrintBar({
             aria-hidden="true"
           />
         </button>
+        {/* F5: machine-readable session export for fleet-sheet ingest.
+            Enabled whenever a completed (frozen) measurement exists. */}
+        <div className="mt-2 grid grid-cols-2 gap-3">
+          <button
+            type="button"
+            onClick={onExportCsv}
+            disabled={!isExportEnabled}
+            data-testid="btn-export-csv"
+            className={`flex h-11 items-center justify-center gap-2 rounded-xl border text-xs font-semibold uppercase tracking-wider transition ${
+              isExportEnabled
+                ? 'border-cyan-400/40 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20'
+                : 'border-white/10 bg-white/5 text-white/30'
+            }`}
+          >
+            <span aria-hidden="true">⬇</span>
+            <span>Export CSV</span>
+          </button>
+          <button
+            type="button"
+            onClick={onExportJson}
+            disabled={!isExportEnabled}
+            data-testid="btn-export-json"
+            className={`flex h-11 items-center justify-center gap-2 rounded-xl border text-xs font-semibold uppercase tracking-wider transition ${
+              isExportEnabled
+                ? 'border-cyan-400/40 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20'
+                : 'border-white/10 bg-white/5 text-white/30'
+            }`}
+          >
+            <span aria-hidden="true">⬇</span>
+            <span>Export JSON</span>
+          </button>
+        </div>
       </div>
     </div>
   )

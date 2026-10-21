@@ -1,10 +1,14 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import { getStatusVisual } from '@/lib/status-colors'
+import type { ProfileEvaluation } from '@/lib/fluid-profiles'
 import type { FluidCardModel } from '@/lib/results-mapper'
 
 interface FluidCardProps {
   model: FluidCardModel
+  /** F1 advisory re-grade vs. the selected fluid spec sheet. Optional: the
+   * 154 legacy tests render cards without profiles and must stay untouched. */
+  profileEvaluation?: ProfileEvaluation | null
 }
 
 const ICON_BG: Record<FluidCardModel['kind'], string> = {
@@ -19,7 +23,13 @@ const ICON_GLYPH: Record<FluidCardModel['kind'], string> = {
   coolant: '❄️',
 }
 
-export function FluidResultCard({ model }: FluidCardProps) {
+const PROFILE_GRADE_CLASS: Record<ProfileEvaluation['grade'], string> = {
+  GOOD: 'border-emerald-400/40 bg-emerald-500/15 text-emerald-300',
+  WARNING: 'border-amber-400/40 bg-amber-500/15 text-amber-300',
+  CRITICAL: 'border-rose-400/40 bg-rose-500/15 text-rose-300',
+}
+
+export function FluidResultCard({ model, profileEvaluation }: FluidCardProps) {
   // R7: prefer the verbatim device status for color + label so LCD human
   // strings ("EXCELLENT", "WATER DETECT", ...) are preserved on the badge
   // instead of collapsing to a gray UNKNOWN.
@@ -77,6 +87,21 @@ export function FluidResultCard({ model }: FluidCardProps) {
           {model.rawStatus ?? visual.label}
         </span>
       </CardHeader>
+
+      {profileEvaluation && (
+        <div className="px-6 pb-2 -mt-2">
+          <span
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider',
+              PROFILE_GRADE_CLASS[profileEvaluation.grade],
+            )}
+            title={profileEvaluation.detail}
+            data-testid={`profile-badge-${model.kind}`}
+          >
+            {profileEvaluation.label}: {profileEvaluation.grade}
+          </span>
+        </div>
+      )}
 
       <CardContent className="pt-0">
         <div className="flex items-baseline gap-2">
