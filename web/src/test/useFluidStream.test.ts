@@ -184,10 +184,39 @@ describe('useFluidStream', () => {
     const firstWs = MockWebSocket.instances[0]
     act(() => firstWs.triggerClose())
     expect(result.current.status).toBe('connecting')
+    // R13: first retry = 1000ms base + up to 30% jitter.
     act(() => {
-      vi.advanceTimersByTime(1100)
+      vi.advanceTimersByTime(2000)
     })
     expect(MockWebSocket.instances).toHaveLength(2)
+  })
+
+  it('backs off exponentially between reconnect attempts', () => {
+    const { result } = renderHook(() =>
+      useFluidStream({ reconnectDelayMs: 100 }),
+    )
+    act(() => result.current.start())
+    // Attempt 1: base 100ms (+ jitter). Advancing 50ms must NOT fire.
+    act(() => MockWebSocket.instances[0].triggerClose())
+    act(() => {
+      vi.advanceTimersByTime(50)
+    })
+    expect(MockWebSocket.instances).toHaveLength(1)
+    act(() => {
+      vi.advanceTimersByTime(2000)
+    })
+    expect(MockWebSocket.instances).toHaveLength(2)
+    // Attempt 2: base 200ms (+ jitter). 150ms must NOT fire.
+    act(() => MockWebSocket.instances[1].triggerClose())
+    act(() => {
+      vi.advanceTimersByTime(150)
+    })
+    expect(MockWebSocket.instances).toHaveLength(2)
+    act(() => {
+      vi.advanceTimersByTime(4000)
+    })
+    expect(MockWebSocket.instances).toHaveLength(3)
+    expect(result.current.status).toBe('connecting')
   })
 
   it('gives up and surfaces error after maxReconnectAttempts consecutive failures', () => {
@@ -198,22 +227,47 @@ describe('useFluidStream', () => {
     // Attempt #1: never opens, then closes (the "device offline" path)
     act(() => MockWebSocket.instances[0].triggerClose())
     act(() => {
-      vi.advanceTimersByTime(150)
+      vi.advanceTimersByTime(500)
     })
     // Attempt #2: also fails
     act(() => MockWebSocket.instances[1].triggerClose())
     act(() => {
-      vi.advanceTimersByTime(150)
+      vi.advanceTimersByTime(500)
     })
     // Attempt #3: also fails — but the hook should now give up
     act(() => MockWebSocket.instances[2].triggerClose())
     act(() => {
-      vi.advanceTimersByTime(150)
+      vi.advanceTimersByTime(500)
     })
     // No 4th socket should appear
     expect(MockWebSocket.instances).toHaveLength(3)
     expect(result.current.status).toBe('error')
     expect(result.current.error).toBeTruthy()
+  })
+
+  it('caps the backoff at maxBackoffMs', () => {
+    const { result } = renderHook(() =>
+      useFluidStream({
+        reconnectDelayMs: 1000,
+        maxReconnectAttempts: 8,
+        maxBackoffMs: 2000,
+      }),
+    )
+    act(() => result.current.start())
+    // Drain enough failing attempts (2^4 x 1000 > 2000 cap) and verify
+    // the 5th retry fires within the 2000ms cap + 30% jitter.
+    for (let i = 0; i < 4; i++) {
+      act(() => MockWebSocket.instances[i].triggerClose())
+      act(() => {
+        vi.advanceTimersByTime(10_000)
+      })
+    }
+    act(() => MockWebSocket.instances[4].triggerClose())
+    act(() => {
+      vi.advanceTimersByTime(10_000)
+    })
+    expect(MockWebSocket.instances).toHaveLength(6)
+    expect(result.current.status).toBe('connecting')
   })
 
   it('does not reconnect after a user-initiated stop()', () => {
@@ -269,5 +323,87 @@ describe('useFluidStream', () => {
     const t2 = result.current.lastUpdateMs
     expect(t2).not.toBeNull()
     expect(t2!).toBeGreaterThan(t1!)
+  })
+
+  describe('staleness watchdog (R3)', () => {
+    it('starts non-stale and never flags stale while idle/connecting', () => {
+      const { result } = renderHook(() => useFluidStream())
+      expect(result.current.isStale).toBe(false)
+      act(() => result.current.start())
+      expect(result.current.isStale).toBe(false)
+      act(() => {
+        vi.advanceTimersByTime(60_000)
+      })
+      // Still connecting (socket never opened) - no stale flag.
+      expect(result.current.status).toBe('connecting')
+      expect(result.current.isStale).toBe(false)
+    })
+
+    it('flags isStale after 15s of silence while the socket is open', () => {
+      const { result } = renderHook(() => useFluidStream())
+      act(() => result.current.start())
+      act(() => MockWebSocket.instances[0].triggerOpen())
+      expect(result.current.isStale).toBe(false)
+      act(() => {
+        vi.advanceTimersByTime(16_000)
+      })
+      expect(result.current.isStale).toBe(true)
+      expect(result.current.status).toBe('streaming')
+    })
+
+    it('heartbeat frames count as activity and clear staleness', () => {
+      const { result } = renderHook(() => useFluidStream())
+      act(() => result.current.start())
+      act(() => MockWebSocket.instances[0].triggerOpen())
+      act(() => {
+        vi.advanceTimersByTime(16_000)
+      })
+      expect(result.current.isStale).toBe(true)
+      act(() => {
+        MockWebSocket.instances[0].triggerMessage({ kind: 'heartbeat', ts: 1 })
+      })
+      expect(result.current.isStale).toBe(false)
+      // Heartbeats must not fabricate UI data.
+      expect(result.current.data).toBeNull()
+      expect(result.current.frozen).toBe(false)
+    })
+
+    it('a data frame clears staleness', () => {
+      const { result } = renderHook(() => useFluidStream())
+      act(() => result.current.start())
+      act(() => MockWebSocket.instances[0].triggerOpen())
+      act(() => {
+        vi.advanceTimersByTime(16_000)
+      })
+      expect(result.current.isStale).toBe(true)
+      act(() => {
+        MockWebSocket.instances[0].triggerMessage({
+          kind: 'snapshot',
+          data: {
+            brake_oil: { moisture: '1%', status: 'NORMAL' },
+            engine_oil: { dielectric: 2.4, water: 'NO', status: 'GOOD', capacitance: null, tbn: null, tan: null, viscosity: null},
+            coolant: { ph: 7, status: 'GOOD' }, },
+        })
+      })
+      expect(result.current.isStale).toBe(false)
+      expect(result.current.data).not.toBeNull()
+    })
+
+    it('clears the stale flag when the socket closes (reconnecting path)', () => {
+      const { result } = renderHook(() => useFluidStream())
+      act(() => result.current.start())
+      act(() => MockWebSocket.instances[0].triggerOpen())
+      act(() => {
+        vi.advanceTimersByTime(16_000)
+      })
+      expect(result.current.isStale).toBe(true)
+      act(() => MockWebSocket.instances[0].triggerClose())
+      expect(result.current.status).toBe('connecting')
+      expect(result.current.isStale).toBe(false)
+      act(() => {
+        vi.advanceTimersByTime(60_000)
+      })
+      expect(result.current.isStale).toBe(false)
+    })
   })
 })

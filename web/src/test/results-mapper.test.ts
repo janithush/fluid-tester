@@ -48,6 +48,22 @@ describe('mapBrakeOil', () => {
     expect(m.noData).toBe(false)
     expect(m.status).toBe('UNKNOWN')
   })
+
+  it('preserves the raw device status in rawStatus (R7)', () => {
+    const m = mapBrakeOil({ moisture: '0.5%', status: 'EXCELLENT' } as never)
+    expect(m.status).toBe('UNKNOWN')
+    expect(m.rawStatus).toBe('EXCELLENT')
+  })
+
+  it('omits rawStatus when the card is noData', () => {
+    const m = mapBrakeOil({ moisture: null, status: 'NO_DATA' } as never)
+    expect(m.rawStatus).toBeUndefined()
+  })
+
+  it('omits rawStatus when the status is not a string', () => {
+    const m = mapBrakeOil({ moisture: '1%', status: 42 } as never)
+    expect(m.rawStatus).toBeUndefined()
+  })
 })
 
 describe('mapEngineOil', () => {
@@ -78,6 +94,12 @@ describe('mapEngineOil', () => {
     const m = mapEngineOil(null)
     expect(m.noData).toBe(true)
     expect(m.hasError).toBe(false)
+  })
+
+  it('preserves the raw device status in rawStatus (R7)', () => {
+    const m = mapEngineOil({ dielectric: 2.4, water: 'NO', status: 'WATER DETECT' } as never)
+    expect(m.status).toBe('UNKNOWN')
+    expect(m.rawStatus).toBe('WATER DETECT')
   })
 })
 

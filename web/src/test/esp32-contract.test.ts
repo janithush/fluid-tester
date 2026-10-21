@@ -75,9 +75,9 @@ describe('ESP32 JSON contract', () => {
   it('ESP32 unmapped status string (e.g. EXCELLENT) maps to UNKNOWN, not ERROR', async () => {
     // The ESP32 LCD uses human strings like EXCELLENT / GOOD/SVC DUE
     // / WATER DETECT that are NOT in the frontend's closed enum.
-    // The mapper must degrade these to UNKNOWN (gray pill) without
-    // flipping hasError=true (which would show the broken "Signal Lost"
-    // card instead).
+    // safeStatus still degrades the enum to UNKNOWN (gray pill), but
+    // R7 requires the raw string to survive on the card model so the
+    // badge can render it verbatim with a safety color.
     const esp32Payload = {
       brake_oil: { moisture: '0.5%', status: 'EXCELLENT' },
       engine_oil: { dielectric: 2.10, water: 'NO', status: 'GOOD/SVC DUE', capacitance: null, tbn: null, tan: null, viscosity: null},
@@ -93,10 +93,38 @@ describe('ESP32 JSON contract', () => {
     const cards = mapAllResults(await fetchFluidResults())
     expect(cards[0].status).toBe('UNKNOWN')
     expect(cards[0].hasError).toBe(false)
+    expect(cards[0].rawStatus).toBe('EXCELLENT')
     expect(cards[1].status).toBe('UNKNOWN')
     expect(cards[1].hasError).toBe(false)
+    expect(cards[1].rawStatus).toBe('GOOD/SVC DUE')
     expect(cards[2].status).toBe('UNKNOWN')
     expect(cards[2].hasError).toBe(false)
+    expect(cards[2].rawStatus).toBe('UNKNOWN')
+  })
+
+  it('R1: pre-measurement engine payload (dielectric/water null) is honest, not fabricated', async () => {
+    // buildResultsJson() now emits dielectric:null / water:null /
+    // capacitance:null (status N/A -> UNKNOWN after normalization)
+    // until webEngineMeasurementTaken is true. The card must render
+    // the honest "nothing measured" view — never "Dielectric 0.00".
+    const esp32Payload = {
+      brake_oil: { moisture: null, status: 'NO_DATA' },
+      engine_oil: { dielectric: null, capacitance: null, water: null, tbn: null, tan: null, viscosity: null, status: 'UNKNOWN' },
+      coolant: { ph: null, status: 'NO_DATA' }, }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve(esp32Payload) }),
+    )
+
+    const cards = mapAllResults(await fetchFluidResults())
+    expect(cards[1].hasError).toBe(false)
+    expect(cards[1].primaryMetric).toBe('N/A')
+    expect(cards[1].primaryMetric).not.toMatch(/Dielectric 0/)
+    // water:null must not fabricate a "Water: NO" safety claim.
+    expect(cards[1].secondaryMetrics.some((s) => s.startsWith('Water:'))).toBe(false)
   })
 
   it('ESP32 N/A status string is preserved as a string but mapped to UNKNOWN', async () => {

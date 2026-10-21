@@ -83,6 +83,7 @@ export function mapBrakeOil(raw: Partial<BrakeOilReading> | null | undefined): F
     status,
     hasError,
     noData,
+    rawStatus: noData ? undefined : typeof data.status === 'string' ? data.status.trim() : undefined,
   }
 }
 
@@ -178,6 +179,7 @@ export function mapEngineOil(raw: Partial<EngineOilReading> | null | undefined):
     status,
     hasError,
     noData,
+    rawStatus: noData ? undefined : typeof data.status === 'string' ? data.status.trim() : undefined,
   }
 }
 
@@ -212,6 +214,7 @@ export function mapCoolant(raw: Partial<CoolantReading> | null | undefined): Flu
     status,
     hasError,
     noData,
+    rawStatus: noData ? undefined : typeof data.status === 'string' ? data.status.trim() : undefined,
   }
 }
 

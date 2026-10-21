@@ -6,6 +6,17 @@ import type {
 } from '@/types/fluid'
 
 /**
+ * R4: the WebSocket endpoint is derived from the page origin by default
+ * (the ESP32 serves this app itself over softAP/mDNS), so the dashboard
+ * works no matter how the operator reached the device - via
+ * `fluidtester.local`, the softAP IP (192.168.4.1), or a LAN alias.
+ */
+const defaultWsUrl =
+  typeof window !== 'undefined'
+    ? `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`
+    : 'ws://192.168.4.1/ws'
+
+/**
  * High-level state of the WebSocket stream. This is the public surface
  * the UI consumes; the underlying WebSocket lifecycle is encapsulated.
  */
@@ -16,15 +27,26 @@ export interface UseFluidStreamState {
   data: FluidResultsResponse | null
   error: Error | null
   lastUpdateMs: number | null
+  /**
+   * R3: true when the socket is still technically open but no frame
+   * (snapshot, delta, or heartbeat) has arrived for longer than
+   * `staleThresholdMs`. The UI must show a distinct "Signal Stale"
+   * state instead of a frozen "Signal Live".
+   */
+  isStale: boolean
 }
 
 export interface UseFluidStreamOptions {
-  /** ws:// or wss:// endpoint. Default matches the ESP32 firmware convention. */
+  /** ws:// or wss:// endpoint. Default derives from window.location. */
   url?: string
-  /** Reconnect delay (ms) on unexpected close. Default 2000. */
+  /** Base reconnect delay (ms) on unexpected close. Default 1500. */
   reconnectDelayMs?: number
-  /** Max consecutive reconnect attempts before giving up. Default Infinity. */
+  /** Max consecutive reconnect attempts before giving up. Default 8. */
   maxReconnectAttempts?: number
+  /** Upper bound for the exponential backoff delay. Default 10000. */
+  maxBackoffMs?: number
+  /** Silence window (ms) after which the stream is flagged stale. Default 15000. */
+  staleThresholdMs?: number
   /** Optional callback fired on every non-heartbeat frame. */
   onFrame?: (frame: WsFrame) => void
 }
@@ -52,19 +74,25 @@ export interface UseFluidStreamApi extends UseFluidStreamState {
  * - `start()` opens the socket and flips status to 'connecting' then
  *   'streaming' on the first frame.
  * - `stop()` closes the socket; `frozen` becomes true.
- * - Errors and unexpected closes trigger a reconnect loop with a fixed
- *   delay. After `maxReconnectAttempts` failures, status becomes 'error'
- *   and the last error is exposed.
+ * - Errors and unexpected closes trigger a reconnect loop with
+ *   exponential backoff + jitter (R13). After `maxReconnectAttempts`
+ *   consecutive failures, status becomes 'error' and the last error is
+ *   exposed.
+ * - Every incoming frame (including heartbeats) refreshes the activity
+ *   timestamp; a `staleThresholdMs` silence while connected flags the
+ *   stream stale (R3).
  * - The hook is safe to use in React 18 StrictMode (the cleanup callback
- *   tears down the socket and the reconnect timer).
+ *   tears down the socket and both timers).
  */
 export function useFluidStream(
   options: UseFluidStreamOptions = {},
 ): UseFluidStreamApi {
   const {
-    url = 'ws://fluidtester.local/ws',
-    reconnectDelayMs = 2000,
-    maxReconnectAttempts = Number.POSITIVE_INFINITY,
+    url = defaultWsUrl,
+    reconnectDelayMs = 1500,
+    maxReconnectAttempts = 8,
+    maxBackoffMs = 10_000,
+    staleThresholdMs = 15_000,
     onFrame,
   } = options
 
@@ -73,31 +101,40 @@ export function useFluidStream(
     data: null,
     error: null,
     lastUpdateMs: null,
+    isStale: false,
   })
 
   // `frozen` is true the moment a snapshot frame has been received. It
   // remains true even after stop() (so the report button stays enabled).
   const [frozen, setFrozen] = useState(false)
 
-  // Refs to the live WebSocket and reconnect timer. They survive renders
-  // and let the cleanup callback reach the current instance.
+  // Refs to the live WebSocket, reconnect timer, and staleness timer.
+  // They survive renders and let the cleanup callback reach the current
+  // instance.
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectAttemptsRef = useRef(0)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const staleTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const lastActivityTsRef = useRef<number | null>(null)
   const stoppedByUserRef = useRef(false)
   const onFrameRef = useRef(onFrame)
   onFrameRef.current = onFrame
 
   // The "apply a frame" function is stable across renders.
   const applyFrame = useCallback((frame: WsFrame) => {
-    if (frame.kind === 'heartbeat') return
+    // R3: every frame - including heartbeats - proves the link is alive.
+    lastActivityTsRef.current = Date.now()
+    if (frame.kind === 'heartbeat') {
+      setState((prev) => (prev.isStale ? { ...prev, isStale: false } : prev))
+      return
+    }
     onFrameRef.current?.(frame)
     setFrozen(true)
     setState((prev) => {
       const ts = Date.now()
       switch (frame.kind) {
         case 'snapshot':
-          return { status: 'streaming', data: frame.data, error: null, lastUpdateMs: ts }
+          return { status: 'streaming', data: frame.data, error: null, lastUpdateMs: ts, isStale: false }
         case 'brake_oil': {
           const next: FluidResultsResponse = {
             brake_oil: frame.data,
@@ -112,7 +149,7 @@ export function useFluidStream(
             },
             coolant: prev.data?.coolant ?? { ph: null, status: 'NO_DATA' },
           }
-          return { ...prev, data: next, lastUpdateMs: ts }
+          return { ...prev, data: next, lastUpdateMs: ts, isStale: false }
         }
         case 'engine_oil': {
           const next: FluidResultsResponse = {
@@ -120,7 +157,7 @@ export function useFluidStream(
             engine_oil: frame.data,
             coolant: prev.data?.coolant ?? { ph: null, status: 'NO_DATA' },
           }
-          return { ...prev, data: next, lastUpdateMs: ts }
+          return { ...prev, data: next, lastUpdateMs: ts, isStale: false }
         }
         case 'coolant': {
           const next: FluidResultsResponse = {
@@ -136,7 +173,7 @@ export function useFluidStream(
             },
             coolant: frame.data,
           }
-          return { ...prev, data: next, lastUpdateMs: ts }
+          return { ...prev, data: next, lastUpdateMs: ts, isStale: false }
         }
         default:
           return prev
@@ -151,6 +188,13 @@ export function useFluidStream(
     }
   }, [])
 
+  const clearStaleTimer = useCallback(() => {
+    if (staleTimerRef.current) {
+      clearInterval(staleTimerRef.current)
+      staleTimerRef.current = null
+    }
+  }, [])
+
   const connect = useCallback(() => {
     clearReconnect()
     // Don't open a second socket if one is already open/connecting.
@@ -162,7 +206,7 @@ export function useFluidStream(
       return
     }
 
-    setState((prev) => ({ ...prev, status: 'connecting', error: null }))
+    setState((prev) => ({ ...prev, status: 'connecting', error: null, isStale: false }))
 
     let ws: WebSocket
     try {
@@ -179,7 +223,17 @@ export function useFluidStream(
 
     ws.onopen = () => {
       reconnectAttemptsRef.current = 0
-      setState((prev) => ({ ...prev, status: 'streaming', error: null }))
+      // R3: the open event starts the activity clock; the watchdog
+      // interval only runs while a socket is live.
+      lastActivityTsRef.current = Date.now()
+      clearStaleTimer()
+      staleTimerRef.current = setInterval(() => {
+        const last = lastActivityTsRef.current
+        const stale =
+          last !== null && Date.now() - last > staleThresholdMs
+        setState((prev) => (prev.isStale === stale ? prev : { ...prev, isStale: stale }))
+      }, 1000)
+      setState((prev) => ({ ...prev, status: 'streaming', error: null, isStale: false }))
     }
 
     ws.onmessage = (event) => {
@@ -198,26 +252,43 @@ export function useFluidStream(
     }
 
     ws.onclose = () => {
+      clearStaleTimer()
       wsRef.current = null
       if (stoppedByUserRef.current) {
         // User-initiated stop: keep the last data on screen, do not retry.
         return
       }
-      if (reconnectAttemptsRef.current >= maxReconnectAttempts) {
+      const attempt = reconnectAttemptsRef.current
+      if (attempt >= maxReconnectAttempts) {
         setState((prev) => ({
           ...prev,
           status: 'error',
+          isStale: false,
           error: new DeviceDisconnectedError(),
         }))
         return
       }
-      reconnectAttemptsRef.current += 1
-      setState((prev) => ({ ...prev, status: 'connecting' }))
+      // R13: exponential backoff with jitter. Delay doubles per failed
+      // attempt (base = reconnectDelayMs), capped at maxBackoffMs, with
+      // up to +30% jitter so multiple tabs do not retry in lockstep.
+      reconnectAttemptsRef.current = attempt + 1
+      const backoff = Math.min(reconnectDelayMs * Math.pow(2, attempt), maxBackoffMs)
+      const delay = backoff + Math.random() * 0.3 * backoff
+      setState((prev) => ({ ...prev, status: 'connecting', isStale: false }))
       reconnectTimerRef.current = setTimeout(() => {
         connect()
-      }, reconnectDelayMs)
+      }, delay)
     }
-  }, [applyFrame, clearReconnect, maxReconnectAttempts, reconnectDelayMs, url])
+  }, [
+    applyFrame,
+    clearReconnect,
+    clearStaleTimer,
+    maxBackoffMs,
+    maxReconnectAttempts,
+    reconnectDelayMs,
+    staleThresholdMs,
+    url,
+  ])
 
   const start = useCallback(() => {
     stoppedByUserRef.current = false
@@ -228,6 +299,7 @@ export function useFluidStream(
   const stop = useCallback(() => {
     stoppedByUserRef.current = true
     clearReconnect()
+    clearStaleTimer()
     if (wsRef.current) {
       try {
         wsRef.current.close()
@@ -236,15 +308,17 @@ export function useFluidStream(
       }
       wsRef.current = null
     }
+    setState((prev) => (prev.isStale ? { ...prev, isStale: false } : prev))
     // Note: we keep `frozen` true and `data` intact so the user can still
     // generate a report from the last frame.
-  }, [clearReconnect])
+  }, [clearReconnect, clearStaleTimer])
 
   // Cleanup on unmount.
   useEffect(() => {
     return () => {
       stoppedByUserRef.current = true
       clearReconnect()
+      clearStaleTimer()
       if (wsRef.current) {
         try {
           wsRef.current.close()
@@ -254,7 +328,7 @@ export function useFluidStream(
         wsRef.current = null
       }
     }
-  }, [clearReconnect])
+  }, [clearReconnect, clearStaleTimer])
 
   return {
     ...state,

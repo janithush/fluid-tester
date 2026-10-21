@@ -82,11 +82,13 @@ const NO_DATA_VISUAL: StatusVisual = {
  * Maps a raw status string from the ESP32 (or a synthetic UI status) to
  * a strict set of three safety colors + one fallback gray for errors.
  *
- * Spec (locked Phase 1):
- *   GOOD / NORMAL  -> green
- *   WARNING / BAD  -> yellow/orange
- *   CRITICAL       -> red
- *   NO_DATA / UNKNOWN / ERROR / missing -> gray
+ * Spec (locked Phase 1, extended by R7 so the real LCD strings map to
+ * safety colors instead of collapsing to gray):
+ *   GOOD / NORMAL / EXCELLENT             -> green
+ *   WARNING / BAD / GOOD/SVC DUE          -> yellow/orange
+ *   CRITICAL / WATER DETECT               -> red
+ *   EMPTY TUBE/ERR                        -> gray (error)
+ *   NO_DATA / UNKNOWN / ERROR / missing   -> gray
  */
 export function getStatusVisual(status: FluidStatus | string | null | undefined): StatusVisual {
   if (status == null) return ERROR_VISUAL
@@ -95,12 +97,17 @@ export function getStatusVisual(status: FluidStatus | string | null | undefined)
   switch (normalized) {
     case 'GOOD':
     case 'NORMAL':
+    case 'EXCELLENT':
       return GOOD_VISUAL
     case 'WARNING':
     case 'BAD':
+    case 'GOOD/SVC DUE':
       return WARNING_VISUAL
     case 'CRITICAL':
+    case 'WATER DETECT':
       return CRITICAL_VISUAL
+    case 'EMPTY TUBE/ERR':
+      return ERROR_VISUAL
     case 'NO_DATA':
       return NO_DATA_VISUAL
     case 'ERROR':

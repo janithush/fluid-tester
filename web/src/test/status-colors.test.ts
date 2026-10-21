@@ -65,6 +65,30 @@ describe('getStatusVisual (status -> color mapping)', () => {
     expect(getStatusVisual('no_data').label).toBe('NO DATA')
   })
 
+  it('maps EXCELLENT to green (R7: LCD human string, not UNKNOWN gray)', () => {
+    const v = getStatusVisual('EXCELLENT')
+    expect(v.color).toBe('green')
+    expect(v.label).not.toBe('UNKNOWN')
+  })
+
+  it('maps GOOD/SVC DUE to yellow', () => {
+    const v = getStatusVisual('GOOD/SVC DUE')
+    expect(v.color).toBe('yellow')
+    expect(v.label).not.toBe('UNKNOWN')
+  })
+
+  it('maps WATER DETECT to red', () => {
+    const v = getStatusVisual('WATER DETECT')
+    expect(v.color).toBe('red')
+    expect(v.label).not.toBe('UNKNOWN')
+  })
+
+  it('maps EMPTY TUBE/ERR to gray (error)', () => {
+    const v = getStatusVisual('EMPTY TUBE/ERR')
+    expect(v.color).toBe('gray')
+    expect(v.label).not.toBe('UNKNOWN')
+  })
+
   it('returns the full StatusVisual (bgClass, textClass, borderClass, glowClass, dotHex, label)', () => {
     const v = getStatusVisual('GOOD')
     expect(v.bgClass).toContain('emerald')

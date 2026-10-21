@@ -63,7 +63,11 @@ describe('fetchFluidResults', () => {
     )
   })
 
-  it('uses the default mDNS endpoint unless overridden', async () => {
+  it('derives the default endpoint from window.location (R4)', async () => {
+    // The dashboard is served by the ESP32 itself, so the default
+    // endpoint must target the page origin - whatever the operator
+    // used to reach the device (mDNS name, softAP IP, LAN alias).
+    const expectedUrl = `${window.location.protocol}//${window.location.host}/api/data`
     // Mock a response-like object that satisfies the API's contract
     // without depending on jsdom's Response.json() implementation.
     const fakeResponse = {
@@ -75,14 +79,34 @@ describe('fetchFluidResults', () => {
 
     await fetchFluidResults()
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://fluidtester.local/api/data',
+      expectedUrl,
       expect.objectContaining({ method: 'GET' }),
     )
 
+    // Explicit parameter overrides always win.
     await fetchFluidResults('http://custom.local/api/x')
     expect(fetchMock).toHaveBeenLastCalledWith(
       'http://custom.local/api/x',
       expect.anything(),
     )
+  })
+
+  it('applies a default 5s abort timeout when no signal is passed (R16)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({}) })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchFluidResults()
+    const call = fetchMock.mock.calls[0][1] as { signal?: AbortSignal }
+    if (typeof AbortSignal.timeout === 'function') {
+      expect(call.signal).toBeInstanceOf(AbortSignal)
+    }
+    // Explicit signals pass through untouched.
+    const controller = new AbortController()
+    await fetchFluidResults('http://custom.local/api/x', controller.signal)
+    const second = fetchMock.mock.calls[1][1] as { signal?: AbortSignal }
+    expect(second.signal).toBe(controller.signal)
   })
 })

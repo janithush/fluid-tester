@@ -20,7 +20,10 @@ const ICON_GLYPH: Record<FluidCardModel['kind'], string> = {
 }
 
 export function FluidResultCard({ model }: FluidCardProps) {
-  const visual = getStatusVisual(model.status)
+  // R7: prefer the verbatim device status for color + label so LCD human
+  // strings ("EXCELLENT", "WATER DETECT", ...) are preserved on the badge
+  // instead of collapsing to a gray UNKNOWN.
+  const visual = getStatusVisual(model.rawStatus ?? model.status)
   const iconBg = ICON_BG[model.kind]
   const icon = ICON_GLYPH[model.kind]
 
@@ -71,7 +74,7 @@ export function FluidResultCard({ model }: FluidCardProps) {
             style={{ backgroundColor: visual.dotHex, boxShadow: `0 0 8px ${visual.dotHex}` }}
             aria-hidden="true"
           />
-          {visual.label}
+          {model.rawStatus ?? visual.label}
         </span>
       </CardHeader>
 

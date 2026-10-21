@@ -103,4 +103,11 @@ export interface FluidCardModel {
   hasError: boolean
   /** The sensor has not produced a numeric reading yet (universal across fluids). */
   noData: boolean
+  /**
+   * R7: the verbatim status string from the device (e.g. "EXCELLENT",
+   * "GOOD/SVC DUE", "WATER DETECT", "EMPTY TUBE/ERR"). Preserved so LCD
+   * human strings survive the closed-enum color mapping; absent when the
+   * card is noData or the device did not send a string status.
+   */
+  rawStatus?: string
 }

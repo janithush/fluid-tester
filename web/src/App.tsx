@@ -109,6 +109,7 @@ export default function App() {
         streamStatus={stream.status}
         isStreaming={stream.isStreaming}
         hasData={stream.data !== null}
+        isStale={stream.isStale}
       />
       <main className="relative z-10 mx-auto max-w-2xl space-y-4 p-4 pb-36">
         <VehicleFormCard
@@ -137,23 +138,29 @@ interface AppHeaderProps {
   streamStatus: StreamStatus
   isStreaming: boolean
   hasData: boolean
+  isStale: boolean
 }
 
-function AppHeader({ streamStatus, isStreaming, hasData }: AppHeaderProps) {
+function AppHeader({ streamStatus, isStreaming, hasData, isStale }: AppHeaderProps) {
   const headerLabel =
     streamStatus === 'streaming'
-      ? hasData
-        ? 'Signal Live'
-        : 'Acquiring'
+      ? isStale
+        ? 'Signal Stale'
+        : hasData
+          ? 'Signal Live'
+          : 'Acquiring'
       : streamStatus === 'connecting'
         ? 'Connecting'
         : streamStatus === 'error'
           ? 'Signal Lost'
           : 'Standby'
 
+  // R3: staleness is amber (visible warning), not green (frozen lie).
   const tone =
     streamStatus === 'streaming'
-      ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-300'
+      ? isStale
+        ? 'border-amber-400/30 bg-amber-500/10 text-amber-300'
+        : 'border-emerald-400/30 bg-emerald-500/10 text-emerald-300'
       : streamStatus === 'connecting'
         ? 'border-amber-400/30 bg-amber-500/10 text-amber-300'
         : streamStatus === 'error'
@@ -187,7 +194,9 @@ function AppHeader({ streamStatus, isStreaming, hasData }: AppHeaderProps) {
             <span
               className={`inline-block h-1.5 w-1.5 rounded-full ${
                 streamStatus === 'streaming'
-                  ? 'bg-emerald-400 glow-green animate-pulse'
+                  ? isStale
+                    ? 'bg-amber-400 animate-pulse'
+                    : 'bg-emerald-400 glow-green animate-pulse'
                   : streamStatus === 'error'
                     ? 'bg-rose-400'
                     : streamStatus === 'connecting'

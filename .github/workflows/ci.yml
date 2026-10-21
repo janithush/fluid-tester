@@ -11,6 +11,13 @@ jobs:
     name: Test & Build
     runs-on: ubuntu-latest
 
+    # R15: the web app (package.json) moved into web/, so every shell
+    # command runs from there. The upload-artifact `path` below is
+    # resolved relative to the workspace root, so it is not affected.
+    defaults:
+      run:
+        working-directory: web
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,5 +43,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: fluid-tester-dist
-          path: dist
+          path: web/dist
           retention-days: 14

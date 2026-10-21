@@ -8,8 +8,10 @@ import { describe, it, expect } from 'vitest'
  * the contract.
  *
  * Rules pinned by these tests:
- *   1. capacitance is null until webEngineMeasurementTaken is true
- *      (operator must click "Fetch" to take a measurement).
+ *   1. dielectric, capacitance AND water are null until
+ *      webEngineMeasurementTaken is true (operator must click "Fetch"
+ *      to take a measurement; R1 removed the fabricated 0.00/"NO"
+ *      pre-measurement values).
  *   2. tbn, tan, viscosity are ALWAYS null in the current firmware
  *      (the sensors are not wired). The mapper renders them as "N/A".
  *   3. The JSON wire shape never omits these fields. A future PR
@@ -29,15 +31,23 @@ function buildEngineOilJson(firmware: {
   webViscosity: number
 }): string {
   const waterFlag = firmware.webWaterStatus.indexOf('YES') >= 0 ? 'YES' : 'NO'
+  // R1: dielectric, capacitance and water are all gated behind
+  // webEngineMeasurementTaken, exactly like the firmware does.
+  const dielectricJson = firmware.webEngineMeasurementTaken
+    ? String(firmware.webDielectric)
+    : 'null'
   const capacitanceJson = firmware.webEngineMeasurementTaken
     ? String(firmware.webCapacitance)
+    : 'null'
+  const waterJson = firmware.webEngineMeasurementTaken
+    ? `"${waterFlag}"`
     : 'null'
 
   return (
     '{' +
-    `"dielectric":${String(firmware.webDielectric)},` +
+    `"dielectric":${dielectricJson},` +
     `"capacitance":${capacitanceJson},` +
-    `"water":"${waterFlag}",` +
+    `"water":${waterJson},` +
     `"tbn":null,` +
     `"tan":null,` +
     `"viscosity":null,` +
@@ -60,6 +70,25 @@ describe('ESP32 firmware — engine_oil wire shape (replica)', () => {
     })
     expect(json).toContain('"capacitance":null')
     expect(json).not.toContain('"capacitance":3.72')
+  })
+
+  it('R1: emits dielectric=null and water=null when webEngineMeasurementTaken is false', () => {
+    // Pre-measurement, the globals hold 0.0/"N/A" from showReadyScreen().
+    // The wire must still carry null, never the fabricated 0.00/"NO".
+    const json = buildEngineOilJson({
+      webDielectric: 0,
+      webCapacitance: 0,
+      webWaterStatus: 'N/A',
+      webEngineStatus: 'N/A',
+      webEngineMeasurementTaken: false,
+      webTBN: 0,
+      webTAN: 0,
+      webViscosity: 0,
+    })
+    expect(json).toContain('"dielectric":null')
+    expect(json).toContain('"water":null')
+    expect(json).not.toContain('"dielectric":0')
+    expect(json).not.toContain('"water":"')
   })
 
   it('emits capacitance as a number (2dp) when webEngineMeasurementTaken is true', () => {
@@ -118,6 +147,29 @@ describe('ESP32 firmware — engine_oil wire shape (replica)', () => {
       tan: null,
       viscosity: null,
       status: 'GOOD',
+    })
+  })
+
+  it('R1: round-trips the pre-measurement payload through JSON.parse', () => {
+    const json = buildEngineOilJson({
+      webDielectric: 0,
+      webCapacitance: 0,
+      webWaterStatus: 'N/A',
+      webEngineStatus: 'N/A',
+      webEngineMeasurementTaken: false,
+      webTBN: 0,
+      webTAN: 0,
+      webViscosity: 0,
+    })
+    const parsed = JSON.parse(json) as Record<string, unknown>
+    expect(parsed).toEqual({
+      dielectric: null,
+      capacitance: null,
+      water: null,
+      tbn: null,
+      tan: null,
+      viscosity: null,
+      status: 'N/A',
     })
   })
 
