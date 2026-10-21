@@ -77,6 +77,9 @@ export default function App() {
   // is stopped, exactly once per frozen dataset. Failures (unsupported
   // environment, quota) degrade to silence - history is never load-bearing.
   const lastSavedDataRef = useRef<FluidResultsResponse | null>(null)
+  // Bumped after every successful save; <HistoryStrip /> re-queries on it
+  // so a fresh run appears in the trend the moment it lands in the store.
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0)
   useEffect(() => {
     if (!stream.frozen || stream.status !== 'idle') return
     const data = stream.data
@@ -87,7 +90,10 @@ export default function App() {
       engineProfileId,
     })
     saveRun(run)
-      .then(() => toast.success('Session saved to vehicle history'))
+      .then(() => {
+        setHistoryRefreshKey((k) => k + 1)
+        toast.success('Session saved to vehicle history')
+      })
       .catch(() => {
         // No IndexedDB (tests / private mode): silent no-op by design.
       })
@@ -182,8 +188,13 @@ export default function App() {
             setEngineProfileId(next.engineProfileId)
           }}
         />
-        {/* F4: historical context appears as soon as the plate resolves */}
-        <HistoryStrip vehicleNumber={form.vehicleNumber} />
+        {/* F4: historical context appears as soon as the plate resolves;
+            remounted via `key` whenever a new run is saved. */}
+        <HistoryStrip
+          key={historyRefreshKey}
+          refreshKey={historyRefreshKey}
+          vehicleNumber={form.vehicleNumber}
+        />
         <FetchControls
           onFetch={handleFetch}
           onStop={handleStop}

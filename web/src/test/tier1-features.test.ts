@@ -235,8 +235,10 @@ describe('Tier 1: IndexedDB vehicle history (F4)', () => {
     expect(found.map((r) => r.kmUsage)).toEqual([25000, 10000])
     expect(found[0].brakeProfileId).toBe('dot-3')
 
-    // Trimming must not defeat the lookup.
+    // Trimming must not defeat the lookup, and casing must not either:
+    // operators type "add2501" while the stored plate is "ADD2501".
     expect(await listRunsByVehicle('  WP-CAB-1234 ')).toHaveLength(2)
+    expect(await listRunsByVehicle('wp-cab-1234')).toHaveLength(2)
     expect(await listRunsByVehicle('UNKNOWN-PLATE')).toHaveLength(0)
   })
 

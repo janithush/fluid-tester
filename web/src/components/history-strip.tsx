@@ -47,10 +47,18 @@ function sparklineY(values: Array<number | null>): Array<number | null> {
   )
 }
 
-export function HistoryStrip({ vehicleNumber }: { vehicleNumber: string }) {
+export function HistoryStrip({
+  vehicleNumber,
+  refreshKey = 0,
+}: {
+  vehicleNumber: string
+  /** F4: bumped by App after each save so a fresh run shows immediately. */
+  refreshKey?: number
+}) {
   const [runs, setRuns] = useState<DiagnosticRun[] | null>(null)
 
   // Debounced lookup: typing "WP-CAB-1..." must not fire five IDB scans.
+  // `refreshKey` joins the deps so a completed session re-queries instantly.
   useEffect(() => {
     const plate = vehicleNumber.trim()
     if (!plate) {
@@ -58,12 +66,15 @@ export function HistoryStrip({ vehicleNumber }: { vehicleNumber: string }) {
       return
     }
     let cancelled = false
+    console.log('[HistoryStrip] Querying for:', plate)
     const timer = window.setTimeout(() => {
       listRunsByVehicle(plate)
         .then((found) => {
+          console.log('[HistoryStrip] Found records:', found)
           if (!cancelled) setRuns(found)
         })
-        .catch(() => {
+        .catch((err) => {
+          console.warn('[HistoryStrip] IndexedDB lookup failed:', err)
           if (!cancelled) setRuns(null)
         })
     }, 250)
@@ -71,7 +82,7 @@ export function HistoryStrip({ vehicleNumber }: { vehicleNumber: string }) {
       cancelled = true
       window.clearTimeout(timer)
     }
-  }, [vehicleNumber])
+  }, [vehicleNumber, refreshKey])
 
   if (!runs || runs.length === 0) return null
 
@@ -151,7 +162,18 @@ export function HistoryStrip({ vehicleNumber }: { vehicleNumber: string }) {
           </div>
         )}
 
-        <ul className="space-y-1.5" data-testid="history-list">
+          {/* Single-run state: no trend math possible yet, but the record
+              must still be visible; previously the whole card was hidden. */}
+          {ordered.length === 1 && (
+            <p
+              className="text-xs text-white/50 border-t border-white/5 pt-1.5"
+              data-testid="history-single-run"
+            >
+              1 Diagnostic Record Found - Run a 2nd test to plot wear trend
+            </p>
+          )}
+
+          <ul className="space-y-1.5" data-testid="history-list">
           {runs.slice(0, 5).map((run) => (
             <li
               key={run.id ?? run.createdAt}

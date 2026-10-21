@@ -119,12 +119,17 @@ export async function saveRun(
   return store.put(run as DiagnosticRun)
 }
 
-/** All runs for a vehicle, newest first. */
+/** All runs for a vehicle, newest first.
+ *  Match is trimmed + case-insensitive: operators type plates in any case
+ *  ("add2501") while the stored record came from the uppercased form field
+ *  ("ADD2501") - both must resolve to the same vehicle. */
 export async function listRunsByVehicle(vehicleNumber: string): Promise<DiagnosticRun[]> {
   const store = await storeFactory()
+  const query = vehicleNumber.trim().toUpperCase()
+  if (!query) return []
   const all = await store.getAll()
   return all
-    .filter((r) => r.vehicleNumber === vehicleNumber.trim())
+    .filter((r) => r.vehicleNumber.trim().toUpperCase() === query)
     .sort((a, b) => b.createdAt - a.createdAt)
 }
 
