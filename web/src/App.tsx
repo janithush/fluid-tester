@@ -52,19 +52,22 @@ export default function App() {
     fetchState.kind === 'success' ? mapAllResults(fetchState.data) : null
 
   const handleFetch = useCallback(() => {
-    if (stream.isStreaming) {
-      // Already streaming — treat the button as a no-op so the operator
-      // can see the live data without interruption.
+    if (stream.isStreaming || stream.status === 'connecting') {
+      // Already live or dialing - treat the button as a no-op so the
+      // operator cannot double-dial the device.
       return
     }
     stream.start()
   }, [stream])
 
-  const handleStop = useCallback(() => {
-    stream.stop()
-  }, [stream])
+  // Bound directly to stream.stop() (stable useCallback identity).
+  const handleStop = stream.stop
+
+  const [isGenerating, setIsGenerating] = useState(false)
 
   const handlePrint = useCallback(() => {
+    // Guard against double-clicks while the pdf chunk is rendering.
+    if (isGenerating) return
     if (!results) {
       toast.error('No test results available. Please fetch data first.')
       return
@@ -77,13 +80,16 @@ export default function App() {
       toast.error('Cannot generate report. Please check form and results.')
       return
     }
+    setIsGenerating(true)
     try {
       generateReport({ form, results })
       toast.success('Report downloaded.')
     } catch {
       toast.error('Failed to generate report. Please try again.')
+    } finally {
+      setIsGenerating(false)
     }
-  }, [form, results])
+  }, [form, results, isGenerating])
 
   // Generate Report is enabled only when we have a frozen snapshot
   // (the user has explicitly stopped the stream AND there's data).
@@ -122,6 +128,7 @@ export default function App() {
           onStop={handleStop}
           isLoading={isLoading}
           showStop={showStopButton}
+          frozen={stream.frozen}
         />
         <StateArea fetchState={fetchState} results={results} />
       </main>
@@ -142,6 +149,8 @@ interface AppHeaderProps {
 }
 
 function AppHeader({ streamStatus, isStreaming, hasData, isStale }: AppHeaderProps) {
+  // 'idle' distinguishes a fresh boot ("Standby") from a user-initiated
+  // stop that left a frozen session on screen ("Stopped").
   const headerLabel =
     streamStatus === 'streaming'
       ? isStale
@@ -153,7 +162,11 @@ function AppHeader({ streamStatus, isStreaming, hasData, isStale }: AppHeaderPro
         ? 'Connecting'
         : streamStatus === 'error'
           ? 'Signal Lost'
-          : 'Standby'
+          : streamStatus === 'idle'
+            ? hasData
+              ? 'Stopped'
+              : 'Standby'
+            : 'Standby'
 
   // R3: staleness is amber (visible warning), not green (frozen lie).
   const tone =
@@ -218,11 +231,13 @@ function FetchControls({
   onStop,
   isLoading,
   showStop,
+  frozen,
 }: {
   onFetch: () => void
   onStop: () => void
   isLoading: boolean
   showStop: boolean
+  frozen: boolean
 }) {
   if (showStop) {
     return (
@@ -291,7 +306,7 @@ function FetchControls({
             style={{ boxShadow: '0 0 10px rgba(255,255,255,0.8)' }}
             aria-hidden="true"
           />
-          Fetch Latest Reading
+          {frozen ? 'Resume Reading' : 'Fetch Latest Reading'}
         </>
       )}
     </button>
@@ -357,8 +372,11 @@ function PrintBar({
         <button
           type="button"
           onClick={onPrint}
+          // Disabled until the form is valid AND telemetry data exists;
+          // active ("Generate Report") once both are satisfied.
           disabled={!isPrintEnabled}
           data-testid="btn-print"
+          data-print-state={isPrintEnabled ? 'ready' : 'standby'}
           className="btn-neon flex h-14 w-full items-center justify-center gap-3 rounded-xl text-sm font-semibold uppercase tracking-wider"
         >
           <span className="text-base" aria-hidden="true">🖨️</span>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { todayIsoDate, validateForm } from '@/lib/form-validation'
@@ -30,7 +30,20 @@ export function VehicleFormCard({ value, onChange, onValidationChange }: Vehicle
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const errors = validateForm({ ...value, date: value.date || todayIsoDate() })
+  // Memoized so `errors` keeps a stable identity across parent
+  // re-renders. Previously `validateForm` ran inline on every render,
+  // producing a fresh object each time and driving the
+  // `onValidationChange` effect into an infinite render loop
+  // (parent state update -> re-render -> new errors object -> effect
+  // -> parent state update ... => "Maximum update depth exceeded").
+  const errors = useMemo(
+    () => validateForm({ ...value, date: value.date || todayIsoDate() }),
+    // Deliberately narrow deps: memoizing on the whole `value` object would
+    // recreate `errors` on every parent re-render and resurrect the loop.
+    // The three fields below are the complete validation surface.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [value.date, value.vehicleNumber, value.kmUsage],
+  )
 
   useEffect(() => {
     onValidationChange?.(errors)
@@ -136,9 +149,15 @@ export function VehicleFormCard({ value, onChange, onValidationChange }: Vehicle
             placeholder="e.g. 45000"
             value={value.kmUsage === 0 ? '' : String(value.kmUsage)}
             onChange={(e) => {
+              // Numeric sanitization: type="number" can still yield
+              // partial garbage like "1e" at keystroke granularity; coerce
+              // any non-finite remainder to 0 so validateForm treats it
+              // as "missing" (positive-number error) instead of NaN
+              // silently propagating into the report pipeline.
+              const next = Number(e.target.value)
               onChange({
                 ...value,
-                kmUsage: e.target.value === '' ? 0 : Number(e.target.value),
+                kmUsage: Number.isFinite(next) ? next : 0,
               })
               markTouched('kmUsage')
             }}

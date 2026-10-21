@@ -300,6 +300,15 @@ export function useFluidStream(
     stoppedByUserRef.current = true
     clearReconnect()
     clearStaleTimer()
+    // Fix: a user stop must land the state machine back on 'idle' so
+    // the operator can resume without a page reload. Previously the
+    // status stayed 'streaming', which left the UI wedged on the
+    // disabled live-reading pill with no way to restart the stream.
+    setState((prev) =>
+      prev.status === 'idle' && !prev.isStale
+        ? prev
+        : { ...prev, status: 'idle', isStale: false },
+    )
     if (wsRef.current) {
       try {
         wsRef.current.close()
@@ -308,9 +317,9 @@ export function useFluidStream(
       }
       wsRef.current = null
     }
-    setState((prev) => (prev.isStale ? { ...prev, isStale: false } : prev))
     // Note: we keep `frozen` true and `data` intact so the user can still
-    // generate a report from the last frame.
+    // generate a report from the last frame - and the UI can offer a
+    // "Resume Reading" action from the same session.
   }, [clearReconnect, clearStaleTimer])
 
   // Cleanup on unmount.
