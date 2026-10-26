@@ -56,9 +56,11 @@
 #define REG_CONFIG              0x1A
 
 // ==== Raw -> pF Calibration Constants ====
-const double refRaw  = 13352500.0;
-const double refPF   = 3.7;
+const double refRaw  = 13335538.0;
+const double refPF   = 11.8;
 const double slope_a = -0.00001220703125;
+const double emptyPF = refPF;
+const double pfPerEr = 0.875;
 
 // Number of samples for smoothing noise
 const int NUM_SAMPLES = 20;
@@ -158,7 +160,7 @@ void setup() {
   Wire1.begin(FDC_SDA_PIN, FDC_SCL_PIN);
   writeReg(REG_CLOCK_DIVIDERS_CH1, 0x20, 0x01);
   writeReg(REG_DRIVE_CURRENT_CH1,  0xF8, 0x00);
-  writeReg(REG_SETTLECOUNT_CH1,   0x00, 0x0A);
+  writeReg(REG_SETTLECOUNT_CH1,   0x00, 0x64);
   writeReg(REG_RCOUNT_CH1,        0xFF, 0xFF);
   writeReg(REG_MUX_CONFIG,        0xC2, 0x0D);
   writeReg(REG_CONFIG,            0x54, 0x01);
@@ -226,12 +228,21 @@ void loop() {
       uint32_t raw = readRaw_CH1();
       if (raw > 0) {
         double cap = refPF + slope_a * ((double)raw - refRaw);
-        if (cap < 0.5) cap = 0.0;
         totalCapacitance += cap;
         validSamples++;
       }
-      delay(20);
+
+      unsigned long sampleWaitStart = millis();
+      while (millis() - sampleWaitStart < 20) {
+        handleButton();
+        if (!isMeasuringEngineOil) break;
+        delay(2);
+      }
+      if (!isMeasuringEngineOil) break;
     }
+
+    handleButton();
+    if (!isMeasuringEngineOil) return;
 
     if (validSamples == 0) {
       Serial.println("[ERROR] FDC2214 I2C Read Failed!");
@@ -239,12 +250,13 @@ void loop() {
       lcd.print("Engine Oil Testing  ");
       lcd.setCursor(0, 1);
       lcd.print("SENSOR ERROR!       ");
-      webEngineStatus = "ERROR";
+      webEngineStatus = "EMPTY TUBE/ERR";
       return;
     }
 
     double avgCapacitance = totalCapacitance / validSamples;
-    double dielectricConstant = 1.0 + ((avgCapacitance - 3.65) / 0.875);
+    if (avgCapacitance < 0.5) avgCapacitance = 0.0;
+    double dielectricConstant = 1.0 + ((avgCapacitance - emptyPF) / pfPerEr);
     if (dielectricConstant < 1.0) dielectricConstant = 1.0;
 
     String oilStatus = getOilStatus(dielectricConstant);
@@ -455,7 +467,8 @@ void handleButton() {
           isDisplayingBrakeOil  = false;
           clickCount            = 0;
           Serial.println("\n[SYSTEM] Engine oil measuring STOPPED (double-click)");
-          showReadyScreen();
+          lcd.setCursor(0, 0);
+          lcd.print("Engine Oil STOPPED  ");
         }
       }
       lastStableState = stableState;
