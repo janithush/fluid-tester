@@ -59,6 +59,36 @@ Semantics enforced by contract tests (`web/src/test/esp32-*-contract.test.ts`, `
 - UART grammar accepted by the firmware: `RESULT,<m>,<r>,<status>` CSV, `Moisture: 1% | Status: NORMAL` pipe, multi-line prefixes, with `Status:`-label stripping and a moisture-derived fallback (`getBrakeStatusFromMoisture`) when a line carries no status.
 - LCD human statuses (`EXCELLENT`, `GOOD/SVC DUE`, `WATER DETECT`, `EMPTY TUBE/ERR`) flow through verbatim (`rawStatus`) into closed-enum safety colors on the web.
 
+## Engine Oil Calibration & GPIO 14 Controls
+
+### FDC2214 calibration (post-wire assembly)
+
+| Parameter | Value |
+| --- | --- |
+| `refRaw` | `13,335,538.0` counts |
+| `refPF` / `emptyPF` | `11.8 pF` |
+| `slope_a` | `-1.220703125e-5 pF/count` |
+| `pfPerEr` | `0.875 pF` per `1.0 Er` |
+| `REG_SETTLECOUNT_CH1` | `0x64` (100 counts) |
+
+The firmware converts each 28-bit raw reading to capacitance and then to dielectric constant:
+
+```text
+cap = refPF + slope_a * (raw - refRaw)
+Er  = 1.0 + ((avgCapacitance - emptyPF) / pfPerEr)
+```
+
+`emptyPF` is defined as `refPF`, so an empty tube reads as `Er = 1.0` at the calibrated raw baseline. The 20-sample average retains the `avgCapacitance < 0.5 -> 0.0` and `Er < 1.0 -> 1.0` sanity clamps.
+
+### Button wiring and operation
+
+- **Wiring:** momentary push button between GPIO 14 and GND. Active-LOW with the ESP32-S3 internal `INPUT_PULLUP` enabled; no external resistors.
+- **Single click:** arms continuous engine-oil measurement, sampling every 1000 ms.
+- **Double click:** stops the measurement loop immediately.
+- **Responsiveness:** the 20-sample acquisition loop services `handleButton()` every 2 ms, so a double-click STOP is not swallowed.
+- **Telemetry freeze:** STOP preserves the last valid LCD and web readings until the next measurement session starts.
+- **Fault handling:** if the I2C/FDC2214 path returns zero valid samples, the engine-oil status is reported as `EMPTY TUBE/ERR`.
+
 ## Architectural Remediation (solved defects)
 
 | ID | Defect | Resolution |
@@ -116,7 +146,7 @@ npm run build
 1. Flash the firmware: open `firmware/esp32/main.ino` in the Arduino IDE with the ESP32-S3 board package; required libraries: `ESPAsyncWebServer`, `AsyncTCP`, `LiquidCrystal_I2C` (plus bundled `WiFi`, `LittleFS`).
 2. Build and upload the frontend to flash: `cd web && npm install && npm run build`, then upload `web/dist/` contents to the LittleFS partition (via `pio run -t uploadfs` or the Arduino IDE LittleFS upload tool) so the device serves `/index.html` and hashed assets.
 3. Connect any device to the SoftAP (`FluidTester_Network`) and open `http://192.168.4.1` - mDNS (`fluidtester.local`) also resolves where supported.
-4. Hardware map: FDC2214 on Wire1 (SDA GPIO 8 / SCL GPIO 9, addr `0x2A`), brake Arduino on `Serial1` RX GPIO 17 @ 9600 8N1, LCD on Wire0 (GPIO 4/5, addr `0x27`), engine-oil trigger button on GPIO 14.
+4. Hardware map: FDC2214 on Wire1 (SDA GPIO 8 / SCL GPIO 9, addr `0x2A`), brake Arduino on `Serial1` RX GPIO 17 @ 9600 8N1, LCD on Wire0 (GPIO 4/5, addr `0x27`), engine-oil momentary button between GPIO 14 and GND (active-LOW, internal pull-up, no external resistors).
 
 ## Engineering Discipline
 
